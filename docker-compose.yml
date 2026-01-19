@@ -1,0 +1,263 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Tenant Management Service
+  postgres-tenant-management:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres-tenant
+    environment:
+      POSTGRES_DB: tenant_management_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-tenant-data:/var/lib/postgresql/data
+      - ./services/tenant-management-service/migrations/pg:/docker-entrypoint-initdb.d
+    networks:
+      - arc-saas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Database for Subscription Service
+  postgres-subscription:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres-subscription
+    environment:
+      POSTGRES_DB: subscription_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-subscription-data:/var/lib/postgresql/data
+      - ./services/subscription-service/migrations/pg:/docker-entrypoint-initdb.d
+    networks:
+      - arc-saas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache for Tenant Management Service
+  redis:
+    image: redis:7-alpine
+    container_name: arc-saas-redis
+    command: redis-server --appendonly yes --requirepass redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - arc-saas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Tenant Management Service
+  tenant-management-service:
+    build:
+      context: .
+      dockerfile: ./services/tenant-management-service/Dockerfile
+      args:
+        SERVICE_NAME: tenant-management-service
+        FROM_FOLDER: services
+        nodeVer: 20-alpine
+    container_name: arc-saas-tenant-management
+    environment:
+      # Service Configuration
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3005
+      LOG_LEVEL: info
+
+      # Database Configuration
+      DB_HOST: postgres-tenant-management
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres_password
+      DB_DATABASE: tenant_management_db
+      DB_SCHEMA: main
+
+      # Redis Configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_password
+      REDIS_DATABASE: 0
+      REDIS_URL: redis://:redis_password@redis:6379/0
+
+      # Webhook & Token Configuration
+      WEBHOOK_SECRET_EXPIRY: 1200000
+      VALIDATION_TOKEN_EXPIRY: 300000
+      LEAD_TOKEN_EXPIRY: 900
+      LEAD_KEY_LENGTH: 36
+      PUBLIC_API_MAX_ATTEMPTS: 10
+      WEBHOOK_API_MAX_ATTEMPTS: 10
+
+      # Application URLs
+      APP_VALIDATE_URL: http://localhost:4200/tenant/verify
+
+      # JWT Configuration
+      JWT_SECRET: your-jwt-secret-change-this-in-production
+      JWT_ISSUER: https://arc-saas.local
+
+      # AWS Configuration (if using AWS services)
+      AWS_REGION: us-east-1
+      # AWS_ACCESS_KEY_ID: your-aws-access-key
+      # AWS_SECRET_ACCESS_KEY: your-aws-secret-key
+
+      # Database Pool Configuration
+      ENABLE_DB_CONNECTION_POOLING: 1
+      DB_MAX_CONNECTIONS: 25
+      DB_IDLE_TIMEOUT_MILLIS: 60000
+      DB_CONNECTION_TIMEOUT_MILLIS: 2000
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres-tenant-management:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - arc-saas-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3005/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Subscription Service
+  subscription-service:
+    build:
+      context: .
+      dockerfile: ./services/subscription-service/Dockerfile
+      args:
+        SERVICE_NAME: subscription-service
+        FROM_FOLDER: services
+        nodeVer: 20-alpine
+    container_name: arc-saas-subscription
+    environment:
+      # Service Configuration
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3002
+      LOG_LEVEL: info
+
+      # Database Configuration
+      DB_HOST: postgres-subscription
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres_password
+      DB_DATABASE: subscription_db
+      DB_SCHEMA: main
+
+      # Redis Configuration (shared with tenant management)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_password
+      REDIS_DATABASE: 1
+      REDIS_URL: redis://:redis_password@redis:6379/1
+
+      # JWT Configuration
+      JWT_SECRET: your-jwt-secret-change-this-in-production
+      JWT_ISSUER: https://arc-saas.local
+
+      # Database Pool Configuration
+      ENABLE_DB_CONNECTION_POOLING: 1
+      DB_MAX_CONNECTIONS: 25
+      DB_IDLE_TIMEOUT_MILLIS: 60000
+      DB_CONNECTION_TIMEOUT_MILLIS: 2000
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres-subscription:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - arc-saas-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Orchestrator Service (optional - minimal service)
+  # orchestrator-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/orchestrator-service/Dockerfile
+  #     args:
+  #       SERVICE_NAME: orchestrator-service
+  #       FROM_FOLDER: services
+  #       nodeVer: 20-alpine
+  #   container_name: arc-saas-orchestrator
+  #   environment:
+  #     NODE_ENV: production
+  #     HOST: 0.0.0.0
+  #     PORT: 3003
+  #     LOG_LEVEL: info
+  #   ports:
+  #     - "3003:3003"
+  #   networks:
+  #     - arc-saas-network
+  #   restart: unless-stopped
+
+  # pgAdmin for Database Management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: arc-saas-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - arc-saas-network
+    depends_on:
+      - postgres-tenant-management
+      - postgres-subscription
+    restart: unless-stopped
+
+  # Redis Commander for Redis Management (optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: arc-saas-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379:1:redis_password
+    ports:
+      - "8081:8081"
+    networks:
+      - arc-saas-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+networks:
+  arc-saas-network:
+    driver: bridge
+    name: arc-saas-network
+
+volumes:
+  postgres-tenant-data:
+    name: arc-saas-postgres-tenant-data
+  postgres-subscription-data:
+    name: arc-saas-postgres-subscription-data
+  redis-data:
+    name: arc-saas-redis-data
+  pgadmin-data:
+    name: arc-saas-pgadmin-data

@@ -1,0 +1,251 @@
+version: '3.8'
+
+# Docker Compose for Development Environment
+# Usage: docker-compose -f docker-compose.dev.yml up
+
+services:
+  # PostgreSQL Database for Tenant Management Service
+  postgres-tenant-management:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres-tenant-dev
+    environment:
+      POSTGRES_DB: tenant_management_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-tenant-dev-data:/var/lib/postgresql/data
+    networks:
+      - arc-saas-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Database for Subscription Service
+  postgres-subscription:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres-subscription-dev
+    environment:
+      POSTGRES_DB: subscription_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-subscription-dev-data:/var/lib/postgresql/data
+    networks:
+      - arc-saas-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: arc-saas-redis-dev
+    command: redis-server --appendonly yes --requirepass redis_dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    networks:
+      - arc-saas-dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Tenant Management Service (Development with Hot Reload)
+  tenant-management-service-dev:
+    build:
+      context: .
+      dockerfile: ./services/tenant-management-service/Dockerfile
+      args:
+        SERVICE_NAME: tenant-management-service
+        FROM_FOLDER: services
+        nodeVer: 20-alpine
+    container_name: arc-saas-tenant-management-dev
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3005
+      LOG_LEVEL: debug
+
+      # Database Configuration
+      DB_HOST: postgres-tenant-management
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres_dev
+      DB_DATABASE: tenant_management_db
+      DB_SCHEMA: main
+
+      # Redis Configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev
+      REDIS_DATABASE: 0
+      REDIS_URL: redis://:redis_dev@redis:6379/0
+
+      # Webhook & Token Configuration
+      WEBHOOK_SECRET_EXPIRY: 1200000
+      VALIDATION_TOKEN_EXPIRY: 300000
+      LEAD_TOKEN_EXPIRY: 900
+      LEAD_KEY_LENGTH: 36
+      PUBLIC_API_MAX_ATTEMPTS: 10
+      WEBHOOK_API_MAX_ATTEMPTS: 10
+
+      # Application URLs
+      APP_VALIDATE_URL: http://localhost:4200/tenant/verify
+
+      # JWT Configuration
+      JWT_SECRET: dev-jwt-secret-key-change-in-production
+      JWT_ISSUER: https://arc-saas-dev.local
+
+      # Database Pool Configuration
+      ENABLE_DB_CONNECTION_POOLING: 1
+      DB_MAX_CONNECTIONS: 10
+      DB_IDLE_TIMEOUT_MILLIS: 60000
+      DB_CONNECTION_TIMEOUT_MILLIS: 2000
+    ports:
+      - "3005:3005"
+      - "9229:9229"  # Node.js debugger port
+    volumes:
+      # Mount source code for hot reload
+      - ./services/tenant-management-service/src:/home/node/app/services/tenant-management-service/src:ro
+      - ./services/tenant-management-service/package.json:/home/node/app/services/tenant-management-service/package.json:ro
+    depends_on:
+      postgres-tenant-management:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - arc-saas-dev-network
+    restart: unless-stopped
+    # Enable debugging
+    command: ["node", "--inspect=0.0.0.0:9229", "."]
+
+  # Subscription Service (Development with Hot Reload)
+  subscription-service-dev:
+    build:
+      context: .
+      dockerfile: ./services/subscription-service/Dockerfile
+      args:
+        SERVICE_NAME: subscription-service
+        FROM_FOLDER: services
+        nodeVer: 20-alpine
+    container_name: arc-saas-subscription-dev
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3002
+      LOG_LEVEL: debug
+
+      # Database Configuration
+      DB_HOST: postgres-subscription
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres_dev
+      DB_DATABASE: subscription_db
+      DB_SCHEMA: main
+
+      # Redis Configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_dev
+      REDIS_DATABASE: 1
+      REDIS_URL: redis://:redis_dev@redis:6379/1
+
+      # JWT Configuration
+      JWT_SECRET: dev-jwt-secret-key-change-in-production
+      JWT_ISSUER: https://arc-saas-dev.local
+
+      # Database Pool Configuration
+      ENABLE_DB_CONNECTION_POOLING: 1
+      DB_MAX_CONNECTIONS: 10
+      DB_IDLE_TIMEOUT_MILLIS: 60000
+      DB_CONNECTION_TIMEOUT_MILLIS: 2000
+    ports:
+      - "3002:3002"
+      - "9230:9229"  # Node.js debugger port
+    volumes:
+      # Mount source code for hot reload
+      - ./services/subscription-service/src:/home/node/app/services/subscription-service/src:ro
+      - ./services/subscription-service/package.json:/home/node/app/services/subscription-service/package.json:ro
+    depends_on:
+      postgres-subscription:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - arc-saas-dev-network
+    restart: unless-stopped
+    # Enable debugging
+    command: ["node", "--inspect=0.0.0.0:9229", "."]
+
+  # pgAdmin for Database Management
+  pgadmin-dev:
+    image: dpage/pgadmin4:latest
+    container_name: arc-saas-pgadmin-dev
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@example.com
+      PGADMIN_DEFAULT_PASSWORD: dev
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-dev-data:/var/lib/pgadmin
+    networks:
+      - arc-saas-dev-network
+    depends_on:
+      - postgres-tenant-management
+      - postgres-subscription
+    restart: unless-stopped
+
+  # Redis Commander for Redis Management
+  redis-commander-dev:
+    image: rediscommander/redis-commander:latest
+    container_name: arc-saas-redis-commander-dev
+    environment:
+      REDIS_HOSTS: local:redis:6379:1:redis_dev
+    ports:
+      - "8081:8081"
+    networks:
+      - arc-saas-dev-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Mailhog for Email Testing (Optional)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: arc-saas-mailhog-dev
+    ports:
+      - "1025:1025"  # SMTP port
+      - "8025:8025"  # Web UI
+    networks:
+      - arc-saas-dev-network
+    restart: unless-stopped
+
+networks:
+  arc-saas-dev-network:
+    driver: bridge
+    name: arc-saas-dev-network
+
+volumes:
+  postgres-tenant-dev-data:
+    name: arc-saas-postgres-tenant-dev-data
+  postgres-subscription-dev-data:
+    name: arc-saas-postgres-subscription-dev-data
+  redis-dev-data:
+    name: arc-saas-redis-dev-data
+  pgadmin-dev-data:
+    name: arc-saas-pgadmin-dev-data

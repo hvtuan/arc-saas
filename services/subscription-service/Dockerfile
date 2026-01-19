@@ -85,4 +85,5 @@ ENV HOST=0.0.0.0 PORT=3000
 
 EXPOSE ${PORT}
 
-CMD [ "node", "." ]
+# Run the server entry point
+CMD [ "node", "dist/server.js" ]

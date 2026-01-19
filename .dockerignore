@@ -1,0 +1,78 @@
+# Node modules
+**/node_modules
+**/npm-debug.log
+**/yarn-error.log
+**/package-lock.json
+**/yarn.lock
+
+# Build output
+**/dist
+**/build
+**/.next
+**/out
+
+# Testing
+**/__tests__
+**/coverage
+**/.nyc_output
+**/test
+**/tests
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+documentation/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Environment
+.env
+.env.*
+!.env.defaults
+
+# Logs
+logs/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Miscellaneous
+.eslintcache
+.prettierignore
+.editorconfig
+.husky/
+commitlint.config.js
